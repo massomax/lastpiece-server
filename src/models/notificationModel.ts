@@ -5,7 +5,7 @@ export interface INotification extends Document {
   sellerId: mongoose.Types.ObjectId;
   type: "registration" | "approval" | "rejection";
   createdAt: Date;
-  readAt: Date;
+  readAt: Date | null;
   data: Record<string, any>;
 }
 

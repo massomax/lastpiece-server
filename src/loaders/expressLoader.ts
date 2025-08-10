@@ -6,6 +6,7 @@ import errorHandler from "../middlewares/errorHandler";
 import sellerRoutes from "../api/seller/sellerRoutes";
 import sellerAdminRoutes from "../api/admin/sellerAdminRoutes";
 import notificationRoutes from "../api/notifications/notificationRoutes";
+import categoryRoutes from "../api/categories/categoryRoutes";
 
 export const initExpress = (app: Application): void => {
   app.use(express.json());
@@ -20,6 +21,7 @@ export const initExpress = (app: Application): void => {
   app.use("/api/v1/sellers", sellerRoutes);
   app.use("/api/v1/admin/sellers", sellerAdminRoutes);
   app.use("/api/v1/notifications", notificationRoutes);
+  app.use("/api/v1/categories", categoryRoutes);
 
   app.use(errorHandler);
 };
