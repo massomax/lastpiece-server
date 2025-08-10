@@ -7,6 +7,7 @@ import sellerRoutes from "../api/seller/sellerRoutes";
 import sellerAdminRoutes from "../api/admin/sellerAdminRoutes";
 import notificationRoutes from "../api/notifications/notificationRoutes";
 import categoryRoutes from "../api/categories/categoryRoutes";
+import productRoutes from "../api/products/productRoutes";
 
 export const initExpress = (app: Application): void => {
   app.use(express.json());
@@ -22,6 +23,7 @@ export const initExpress = (app: Application): void => {
   app.use("/api/v1/admin/sellers", sellerAdminRoutes);
   app.use("/api/v1/notifications", notificationRoutes);
   app.use("/api/v1/categories", categoryRoutes);
+  app.use("/api/v1/products", productRoutes);
 
   app.use(errorHandler);
 };

@@ -3,6 +3,7 @@ import config from "../config";
 import NotificationModel from "../models/notificationModel";
 import SellerModel from "../models/sellerModel";
 import CategoryModel from "../models/categoryModel";
+import ProductModel from "../models/productModel";
 
 export const initMongo = async (): Promise<void> => {
   try {
@@ -14,6 +15,7 @@ export const initMongo = async (): Promise<void> => {
       SellerModel.syncIndexes(),
       NotificationModel.syncIndexes(),
       CategoryModel.syncIndexes(),
+      ProductModel.syncIndexes(),
     ]);
     console.log("✅ Indexes synced");
   } catch (error) {
