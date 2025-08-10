@@ -12,6 +12,7 @@ import helmet from "helmet";
 import config from "../config";
 import rateLimit from "express-rate-limit";
 import uploadRoutes, { uploadLimiter } from "../api/uploads/uploadRoutes";
+import cors from "cors";
 
 export const initExpress = (app: Application): void => {
   app.use(express.json());
@@ -22,10 +23,11 @@ export const initExpress = (app: Application): void => {
   // CORS (для куки нужно credentials + конкретные origin’ы)
   app.use(
     cors({
-      origin: (origin, cb) => {
-        if (!origin) return cb(null, true); // Postman/CLI
-        if (config.cors.origins.includes(origin)) return cb(null, true);
-        return cb(new Error("CORS blocked"));
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true); // Postman/CLI
+        if (config.cors.origins.includes("*")) return callback(null, true);
+        if (config.cors.origins.includes(origin)) return callback(null, true);
+        return callback(new Error("CORS blocked"), false);
       },
       credentials: config.cors.credentials,
     })
@@ -55,7 +57,3 @@ export const initExpress = (app: Application): void => {
 
   app.use(errorHandler);
 };
-
-function cors(arg0: { origin: (origin: any, cb: any) => any; credentials: boolean; }): any {
-  throw new Error("Function not implemented.");
-}

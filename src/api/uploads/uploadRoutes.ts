@@ -1,6 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import authenticateJwt from "../../middlewares/authenticateJwt";
 import { authorize } from "../../middlewares/authorize";
 import validateRequest from "../../middlewares/validateRequest";
@@ -13,10 +13,9 @@ const router = Router();
 // Индивидуальный лимитер на аплоады
 export const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 60, // 60 запросов на 15 минут
+  max: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req: any) => req.user?.sub || req.ip,
 });
 
 const storage = multer.memoryStorage();
