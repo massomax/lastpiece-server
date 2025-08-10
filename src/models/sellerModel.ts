@@ -60,4 +60,6 @@ const sellerSchema = new Schema<SellerDoc>(
   }
 );
 
+sellerSchema.index({ status: 1, createdAt: -1 });
+
 export default model<SellerDoc>("Seller", sellerSchema);
