@@ -1,6 +1,7 @@
 import { FilterQuery, Types } from "mongoose";
 import Category, { CategoryDoc } from "../models/categoryModel";
 import { slugify, normalizeName } from "../utils/slug";
+import Product from "../models/productModel";
 
 export interface CategoryInput {
   name: string;
@@ -126,7 +127,20 @@ export async function merge(id: string, targetId: string) {
 }
 
 export async function archive(id: string) {
-  // TODO: когда появятся продукты, проверять связи и кидать 409, если есть активные товары
+  // Проверяем, есть ли активные не удалённые товары в категории
+  const activeCount = await Product.countDocuments({
+    categoryId: new Types.ObjectId(id),
+    status: "active",
+    deletedAt: null,
+  });
+
+  if (activeCount > 0) {
+    const err: any = new Error("CategoryHasActiveProducts");
+    err.status = 409;
+    err.payload = { activeCount };
+    throw err;
+  }
+
   const updated = await Category.findByIdAndUpdate(id, {
     $set: { status: "archived" },
   });

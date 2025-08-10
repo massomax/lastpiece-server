@@ -89,6 +89,8 @@ export async function createProduct(
   const _id = new Types.ObjectId();
   const shuffleKey = computeShuffleKey(_id.toHexString(), SHUFFLE_SALT);
 
+  const status = role === "seller" ? "draft" : input.status ?? "draft";
+
   const doc = await Product.create({
     _id,
     sellerId: new Types.ObjectId(sellerId),
@@ -106,7 +108,7 @@ export async function createProduct(
     currency: input.currency ?? "RUB",
 
     stockQty: input.stockQty ?? 0,
-    status: input.status ?? "draft",
+    status,
     sku: input.sku ?? undefined,
 
     deletedAt: null,
@@ -114,7 +116,6 @@ export async function createProduct(
     promotionLevel: level,
     promotionEndAt,
     rankScore,
-
     shuffleKey,
   });
 
@@ -141,6 +142,14 @@ export async function updateProduct(
   }
 
   if (role === "seller" && input.sellerId) delete input.sellerId;
+
+  if (role === "seller" && input.status !== undefined) {
+    if (input.status === "active") {
+      const err: any = new Error("SellerCannotActivateProduct");
+      err.status = 403;
+      throw err;
+    }
+  }
 
   if (input.categoryId) {
     const snap = await resolveCategorySnapshot(input.categoryId);

@@ -18,4 +18,20 @@ export default {
     httpOnly: true,
     sameSite: "strict" as const,
   },
+  cors: {
+    // через запятую: https://app.dev,https://admin.dev
+    origins: (process.env.CORS_ORIGINS || "http://localhost:5173")
+      .split(",")
+      .map((s) => s.trim()),
+    credentials: true,
+  },
+  uploads: {
+    imgurClientId: process.env.IMGUR_CLIENT_ID || "",
+    maxFiles: parseInt(process.env.UPLOAD_MAX_FILES || "5", 10),
+    maxFileSizeMB: parseInt(process.env.UPLOAD_MAX_MB || "5", 10),
+    allowedMime: ["image/jpeg", "image/png", "image/webp"],
+  },
+  promo: {
+    salt: process.env.PROMO_SALT || "default-salt",
+  },
 };

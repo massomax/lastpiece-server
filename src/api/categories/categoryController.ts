@@ -44,10 +44,10 @@ export async function proposeCategory(
       createdBy: cat.createdBy,
     });
   } catch (e: any) {
-    if (e.status === 409 && e.payload) {
+    if ((e as any).status === 409 && (e as any).payload) {
       return res
         .status(409)
-        .json({ error: "CategoryAlreadyExists", ...e.payload });
+        .json({ error: "CategoryHasActiveProducts", ...(e as any).payload });
     }
     next(e);
   }
