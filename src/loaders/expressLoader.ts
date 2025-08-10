@@ -2,23 +2,26 @@ import { Application, Request, Response } from "express";
 import express from "express";
 import cookieParser from "cookie-parser";
 import errorHandler from "../middlewares/errorHandler";
+import helmet from "helmet";
+import config from "../config";
+import rateLimit from "express-rate-limit";
+import { initSwagger } from "./swaggerLoader";
+import cors from "cors";
 // роуты
 import sellerRoutes from "../api/seller/sellerRoutes";
 import sellerAdminRoutes from "../api/admin/sellerAdminRoutes";
 import notificationRoutes from "../api/notifications/notificationRoutes";
 import categoryRoutes from "../api/categories/categoryRoutes";
 import productRoutes from "../api/products/productRoutes";
-import helmet from "helmet";
-import config from "../config";
-import rateLimit from "express-rate-limit";
 import uploadRoutes, { uploadLimiter } from "../api/uploads/uploadRoutes";
-import cors from "cors";
 
 export const initExpress = (app: Application): void => {
   app.use(express.json());
   app.use(cookieParser());
 
   app.use(helmet());
+  // Swagger (UI по /docs, сырой YAML по /openapi.yaml)
+  initSwagger(app);
 
   // CORS (для куки нужно credentials + конкретные origin’ы)
   app.use(

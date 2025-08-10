@@ -1,0 +1,544 @@
+openapi: "3.0.3"
+info:
+  title: LastPiece API
+  version: "1.0.0"
+  description: >
+    Backend API для категорий, товаров (с курсорной пагинацией и платным ранжированием)
+    и загрузки изображений через Imgur-прокси.
+
+servers:
+  - url: http://localhost:3000
+    description: Local
+
+tags:
+  - name: Categories
+    description: Управление категориями (публичные списки и админ-модерация)
+  - name: Products
+    description: CRUD товаров + листинги с курсором
+  - name: Uploads
+    description: Загрузка изображений (Imgur proxy)
+
+paths:
+  /api/v1/categories:
+    get:
+      tags: [Categories]
+      summary: Список активных категорий
+      operationId: listActiveCategories
+      parameters:
+        - in: query
+          name: parentId
+          description: ID родителя. Если не указан — возвращаются корневые категории.
+          schema: { type: string, nullable: true }
+        - in: query
+          name: q
+          description: Поисковый запрос по name/synonyms (минимум 2 символа).
+          schema: { type: string, minLength: 2 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CategoryShort"
+              examples:
+                ok:
+                  value:
+                    - { id: "66b...", name: "Молоко", slug: "moloko", parentId: null }
+                    - { id: "66c...", name: "Йогурты", slug: "yogurty", parentId: "66b..." }
+
+  /api/v1/categories/propose:
+    post:
+      tags: [Categories]
+      summary: Предложить новую категорию (создаёт pending)
+      operationId: proposeCategory
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 3, maxLength: 60 }
+                parentId: { type: string, nullable: true }
+      responses:
+        "201":
+          description: Created (pending)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+              examples:
+                created:
+                  value:
+                    id: "66d..."
+                    name: "Греческий йогурт"
+                    slug: "grecheskiy-yogurt"
+                    status: "pending"
+                    parentId: "66b..."
+                    createdBy: "seller"
+        "409":
+          description: Duplicate / похожая категория найдена
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConflictDuplicate"
+
+  /api/v1/categories/pending:
+    get:
+      tags: [Categories]
+      summary: Список предложенных категорий (pending)
+      operationId: listPendingCategories
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingPage"
+
+  /api/v1/categories/{id}/approve:
+    patch:
+      tags: [Categories]
+      summary: Одобрить категорию (pending → active)
+      operationId: approveCategory
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: No Content }
+        "404": { description: Not found / already active }
+
+  /api/v1/categories/{id}/merge:
+    patch:
+      tags: [Categories]
+      summary: Слить категорию в целевую (source → archived)
+      operationId: mergeCategory
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetId]
+              properties:
+                targetId:
+                  type: string
+                  description: ID категории-назначения (должна существовать)
+      responses:
+        "204": { description: No Content }
+        "404": { description: Source/target not found }
+        "400": { description: targetId совпадает с id }
+
+  /api/v1/categories/{id}/archive:
+    patch:
+      tags: [Categories]
+      summary: Архивировать категорию
+      description: Запрещено, если в категории есть активные товары.
+      operationId: archiveCategory
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: No Content }
+        "409":
+          description: В категории есть активные товары
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConflictCategoryHasActiveProducts"
+        "404": { description: Category not found }
+
+  /api/v1/products:
+    get:
+      tags: [Products]
+      summary: Витрина — все товары (cursor)
+      operationId: listAllProducts
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string, nullable: true }
+          description: base64(JSON) с тройкой `{ r, s, id }` (rankScore, shuffleKey, _id)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorPageProducts"
+    post:
+      tags: [Products]
+      summary: Создать продукт
+      description: >
+        Seller всегда создаёт товар в статусе `draft` (сервер игнорирует присланный `status`).  
+        Admin может указать `sellerId` и произвольный `status`.
+      operationId: createProduct
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductCreate"
+            examples:
+              sample:
+                value:
+                  title: "Йогурт греческий 500г"
+                  categoryId: "66b..."
+                  price: 19900
+                  currency: "RUB"
+                  images: ["https://i.imgur.com/abc123.jpg"]
+                  isFeatured: false
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "400": { description: Validation error / sellerIdRequiredForAdmin }
+        "404": { description: CategoryNotFoundOrInactive }
+
+  /api/v1/products/{id}:
+    patch:
+      tags: [Products]
+      summary: Обновить продукт
+      description: >
+        Seller не может выставлять `status=active` и не может менять `sellerId`.  
+        Опционально: `rotateShuffle: true` — пересчитать `shuffleKey` (детерминированная «перетасовка»).
+      operationId: updateProduct
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProductUpdate"
+            examples:
+              rotate:
+                summary: Перетасовать внутри ранга
+                value: { rotateShuffle: true }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Product"
+        "403":
+          description: SellerCannotActivateProduct / Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForbiddenSellerActivate"
+        "404": { description: ProductNotFound }
+    delete:
+      tags: [Products]
+      summary: Удалить продукт (soft)
+      operationId: deleteProduct
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: No Content }
+        "404": { description: ProductNotFound }
+
+  /api/v1/products/by-seller/{sellerId}:
+    get:
+      tags: [Products]
+      summary: Товары конкретного селлера (cursor)
+      operationId: listProductsBySeller
+      parameters:
+        - in: path
+          name: sellerId
+          required: true
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string, nullable: true }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorPageProducts"
+
+  /api/v1/products/by-category/{categorySlug}:
+    get:
+      tags: [Products]
+      summary: Товары по категории (cursor)
+      operationId: listProductsByCategory
+      parameters:
+        - in: path
+          name: categorySlug
+          required: true
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string, nullable: true }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CursorPageProducts"
+        "404": { description: CategoryNotFoundOrInactive }
+
+  /api/v1/uploads/images:
+    post:
+      tags: [Uploads]
+      summary: Загрузка изображений (Imgur proxy)
+      operationId: uploadImages
+      description: Принимает 1–5 файлов `images[]` (jpeg/png/webp), до N МБ каждый.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [images]
+              properties:
+                images:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                album:
+                  type: string
+                  description: Необязательный id альбома Imgur
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/UploadResult"
+        "400": { description: NoFiles / неверные данные }
+        "401": { description: Unauthorized }
+        "415": { description: Unsupported media type }
+        "502": { description: ImgurUploadFailed }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    # === Categories ===
+    CategoryShort:
+      type: object
+      required: [id, name, slug]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        slug: { type: string }
+        parentId:
+          oneOf:
+            - { type: string }
+            - { type: "null" }
+
+    Category:
+      allOf:
+        - $ref: "#/components/schemas/CategoryShort"
+        - type: object
+          properties:
+            status:
+              type: string
+              enum: [active, pending, archived]
+            createdBy:
+              type: string
+              enum: [admin, seller]
+
+    PendingPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Category" }
+        total: { type: integer }
+        page: { type: integer }
+        limit: { type: integer }
+
+    ConflictDuplicate:
+      type: object
+      properties:
+        error: { type: string, example: "CategoryAlreadyExists" }
+        suggestions:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              slug: { type: string }
+
+    ConflictCategoryHasActiveProducts:
+      type: object
+      properties:
+        error: { type: string, example: "CategoryHasActiveProducts" }
+        activeCount: { type: integer, example: 3 }
+
+    # === Products ===
+    Product:
+      type: object
+      properties:
+        _id: { type: string, description: "Mongo ObjectId" }
+        id: { type: string, description: "Дублируется на фронте, если нужно" }
+        sellerId: { type: string }
+        title: { type: string }
+        description: { type: string }
+        images:
+          type: array
+          items: { type: string, format: uri }
+        tags:
+          type: array
+          items: { type: string }
+        categoryId: { type: string }
+        categoryName: { type: string }
+        categorySlug: { type: string }
+        price: { type: integer, description: "в минимальных единицах (копейки)" }
+        oldPrice: { type: integer, nullable: true }
+        currency: { type: string, enum: [RUB, EUR, USD] }
+        stockQty: { type: integer }
+        status: { type: string, enum: [draft, active, archived] }
+        sku: { type: string, nullable: true }
+        isFeatured: { type: boolean }
+        promotionLevel: { type: string, enum: [none, basic, plus, pro] }
+        promotionEndAt:
+          oneOf:
+            - { type: string, format: date-time }
+            - { type: "null" }
+        rankScore: { type: number }
+        shuffleKey: { type: number }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    ProductCreate:
+      type: object
+      required: [title, price, categoryId]
+      properties:
+        sellerId: { type: string, description: "Только для admin" }
+        title: { type: string, minLength: 1 }
+        description: { type: string }
+        images:
+          type: array
+          items: { type: string, format: uri }
+        tags:
+          type: array
+          items: { type: string }
+        categoryId: { type: string }
+        price: { type: integer, minimum: 0 }
+        oldPrice: { type: integer, minimum: 0 }
+        currency: { type: string, enum: [RUB, EUR, USD], default: RUB }
+        stockQty: { type: integer, minimum: 0, default: 0 }
+        status:
+          type: string
+          enum: [draft, active, archived]
+          description: "Игнорируется для seller (сервер принудительно ставит draft)"
+        sku: { type: string }
+        isFeatured: { type: boolean, default: false }
+        promotionLevel: { type: string, enum: [none, basic, plus, pro], default: none }
+        promotionEndAt: { type: string, format: date-time }
+
+    ProductUpdate:
+      allOf:
+        - $ref: "#/components/schemas/ProductCreate"
+        - type: object
+          properties:
+            rotateShuffle:
+              type: boolean
+              description: Пересчитать shuffleKey (детерминированная «перетасовка»)
+
+    CursorPageProducts:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Product" }
+        nextCursor:
+          oneOf:
+            - { type: string }
+            - { type: "null" }
+      example:
+        items:
+          - _id: "66b9...d1"
+            title: "Товар 1"
+            images: ["https://i.imgur.com/..jpg"]
+            price: 60000
+            oldPrice: 80000
+            currency: RUB
+            isFeatured: false
+            categoryName: "Хлеб"
+            categorySlug: "hleb"
+            sellerId: "66a1...ab"
+            stockQty: 12
+            rankScore: 20
+            shuffleKey: 123456789
+            createdAt: "2025-08-09T19:37:11.000Z"
+            updatedAt: "2025-08-09T19:37:11.000Z"
+        nextCursor: "eyJyIjoyMCwic...I6IjY2YjkuLi5kMSJ9"
+
+    ForbiddenSellerActivate:
+      type: object
+      properties:
+        error: { type: string, example: "SellerCannotActivateProduct" }
+
+    # === Uploads ===
+    UploadResult:
+      type: object
+      properties:
+        url: { type: string, format: uri }
+        deleteHash: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        size: { type: integer }
+        id: { type: string }
