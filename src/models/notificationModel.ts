@@ -1,43 +1,41 @@
-// src/models/notificationModel.ts
+import mongoose, { Schema, Document } from "mongoose";
 
-import { Schema, model, Document, Types } from "mongoose";
-import moment from "moment-timezone";
-
-// Типы уведомления точно повторяют статус продавца
-export type NotificationType = "pending" | "active" | "suspended";
-
-export interface NotificationDoc extends Document {
-  sellerId: Types.ObjectId; // ссылка на Seller
-  type: NotificationType; // pending, active или suspended
-  data: Record<string, any>; // любые доп. данные (например, companyName, email)
-  createdAt: Date; // московское время
+// Интерфейс Mongoose-документа уведомления
+export interface INotification extends Document {
+  sellerId: mongoose.Types.ObjectId;
+  type: "registration" | "approval" | "rejection";
+  createdAt: Date;
+  data: Record<string, any>;
 }
 
-const notificationSchema = new Schema<NotificationDoc>(
-  {
-    sellerId: {
-      type: Schema.Types.ObjectId,
-      ref: "Seller",
-      required: true,
-    },
-    type: {
-      type: String,
-      enum: ["pending", "active", "suspended"],
-      required: true,
-    },
-    data: {
-      type: Schema.Types.Mixed,
-      required: true,
-    },
+const NotificationSchema: Schema<INotification> = new Schema({
+  // Ссылка на продавца, на которого создано уведомление
+  sellerId: {
+    type: Schema.Types.ObjectId,
+    ref: "Seller",
+    required: true,
   },
-  {
-    // Только createdAt и с учётом Europe/Moscow
-    timestamps: {
-      createdAt: true,
-      updatedAt: false,
-      currentTime: () => moment().tz("Europe/Moscow").toDate(),
-    },
-  }
-);
+  // Тип события уведомления
+  type: {
+    type: String,
+    enum: ["registration", "approval", "rejection"],
+    required: true,
+  },
+  // Время создания уведомления (при создании передаём moment().tz('Europe/Moscow').toDate())
+  createdAt: {
+    type: Date,
+    required: true,
+  },
+  // Произвольные дополнительные данные по необходимости
+  data: {
+    type: Schema.Types.Mixed,
+    default: {},
+  },
+});
 
-export default model<NotificationDoc>("Notification", notificationSchema);
+// Экспорт модели
+const NotificationModel = mongoose.model<INotification>(
+  "Notification",
+  NotificationSchema
+);
+export default NotificationModel;

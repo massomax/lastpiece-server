@@ -1,13 +1,22 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import moment from "moment-timezone";
+
 import SellerModel, { SellerDoc } from "../models/sellerModel";
+import NotificationModel from "../models/notificationModel";
 import config from "../config";
 
-interface JwtPair {
+/**
+ * Пара токенов
+ */
+export interface JwtPair {
   accessToken: string;
   refreshToken: string;
 }
 
+/**
+ * Опции для установки cookie с refresh токеном
+ */
 export const cookieOpts = () => ({
   httpOnly: config.cookie.httpOnly,
   secure: config.cookie.secure,
@@ -16,130 +25,130 @@ export const cookieOpts = () => ({
   maxAge: msFromDuration(config.jwt.refreshExpires),
 });
 
-// основной метод регистрации
-export const registerSeller = async (payload: {
-  companyName: string;
-  email: string;
-  password: string;
-  phone: string;
-  website?: string;
-  description: string;
-  address?: string;
-  logoUrl?: string;
-  tags?: string[];
-}): Promise<{
-  accessToken: { accessToken: string; refreshToken: string };
-}> => {
-  // 1. Проверяем уникальность email
-  const exists = await SellerModel.findOne({ email: payload.email });
-  if (exists)
-    throw Object.assign(new Error("Email already in use"), { status: 400 });
+/**
+ * Конвертация строковой длительности (e.g. "7d", "15m") в миллисекунды
+ */
+export const msFromDuration = (dur: string): number => {
+  const match = dur.match(/(\d+)([smhd])/);
+  if (!match) return 0;
+  const [, amount, unit] = match;
+  const map: Record<string, number> = { s: 1e3, m: 6e4, h: 36e5, d: 864e5 };
+  return parseInt(amount, 10) * map[unit as keyof typeof map];
+};
 
-  // 2. Хешируем пароль
-  const hashed = await bcrypt.hash(payload.password, 12);
+/**
+ * Регистрирует нового продавца, создаёт уведомление о регистрации и возвращает пару JWT
+ */
+export async function registerSeller(
+  dto: Omit<SellerDoc, "status" | "role" | "_id"> & { password: string }
+): Promise<JwtPair> {
+  const saltRounds = 10;
+  const hashedPassword = await bcrypt.hash(dto.password, saltRounds);
 
-  // 3. Создаём запись
-  const seller = await SellerModel.create({
-    ...payload,
-    password: hashed,
+  const seller = new SellerModel({
+    ...dto,
+    password: hashedPassword,
+    status: "pending",
+  });
+  await seller.save();
+
+  await NotificationModel.create({
+    sellerId: seller._id,
+    type: "registration",
+    data: {
+      companyName: seller.companyName,
+      email: seller.email,
+    },
+    createdAt: moment().tz("Europe/Moscow").toDate(),
   });
 
-  // 4. Генерируем токены
-  const jwtPayload = { sub: seller.id, role: seller.role };
-  const accessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
+  const payload = { sub: seller._id.toString(), role: seller.role };
+  const accessToken = jwt.sign(payload, config.jwt.accessSecret, {
     expiresIn: config.jwt.accessExpires,
   });
-  const refreshToken = jwt.sign(jwtPayload, config.jwt.refreshSecret, {
+  const refreshToken = jwt.sign(payload, config.jwt.refreshSecret, {
     expiresIn: config.jwt.refreshExpires,
   });
 
-  return { accessToken: { accessToken, refreshToken } };
-};
+  return { accessToken, refreshToken };
+}
 
-export const loginSeller = async (
-  email: string,
-  password: string
-): Promise<JwtPair> => {
-  // 1. Найти по email
-  const seller = await SellerModel.findOne({ email }).exec();
+/**
+ * Аутентифицирует продавца по email/password и возвращает пару JWT
+ */
+export async function loginSeller(
+  dto: Pick<SellerDoc, "email" | "password">
+): Promise<JwtPair> {
+  const seller = await SellerModel.findOne({ email: dto.email });
   if (!seller) {
     const err = new Error("Invalid email or password");
     (err as any).status = 401;
     throw err;
   }
 
-  // 2. Проверить пароль
-  const match = await bcrypt.compare(password, seller.password);
-  if (!match) {
+  const isMatch = await bcrypt.compare(dto.password, seller.password);
+  if (!isMatch) {
     const err = new Error("Invalid email or password");
     (err as any).status = 401;
     throw err;
   }
 
-  // 3. Сгенерировать JWT
-  const jwtPayload = { sub: seller.id, role: seller.role };
-  const accessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
+  if (seller.status !== "active") {
+    const err = new Error(
+      seller.status === "pending"
+        ? "Account pending approval"
+        : "Account suspended"
+    );
+    (err as any).status = 403;
+    throw err;
+  }
+
+  const payload = { sub: seller._id.toString(), role: seller.role };
+  const accessToken = jwt.sign(payload, config.jwt.accessSecret, {
     expiresIn: config.jwt.accessExpires,
   });
-  const refreshToken = jwt.sign(jwtPayload, config.jwt.refreshSecret, {
+  const refreshToken = jwt.sign(payload, config.jwt.refreshSecret, {
     expiresIn: config.jwt.refreshExpires,
   });
 
   return { accessToken, refreshToken };
-};
+}
 
-export const refreshTokens = async (
-  token: string
-): Promise<{ accessToken: string; refreshToken: string }> => {
-  if (!token) {
-    const err = new Error("No refresh token provided");
-    (err as any).status = 401;
-    throw err;
-  }
-
+/**
+ * Обновляет пару JWT по refresh токену и возвращает новую пару
+ */
+export async function refreshTokens(currentToken: string): Promise<JwtPair> {
   let payload: any;
   try {
-    payload = jwt.verify(token, config.jwt.refreshSecret) as {
-      sub: string;
-      role: string;
-    };
+    payload = jwt.verify(currentToken, config.jwt.refreshSecret);
   } catch {
     const err = new Error("Invalid or expired refresh token");
     (err as any).status = 401;
     throw err;
   }
 
-  // Опционально: проверить, что пользователь всё ещё существует
-  const seller = await SellerModel.findById(payload.sub).exec();
+  const seller = await SellerModel.findById(payload.sub);
   if (!seller) {
     const err = new Error("Seller not found");
-    (err as any).status = 401;
+    (err as any).status = 404;
     throw err;
   }
 
-  // Генерируем новую пару токенов
-  const jwtPayload = { sub: seller.id, role: seller.role };
-  const newAccessToken = jwt.sign(jwtPayload, config.jwt.accessSecret, {
+  const newPayload = { sub: seller._id.toString(), role: seller.role };
+  const accessToken = jwt.sign(newPayload, config.jwt.accessSecret, {
     expiresIn: config.jwt.accessExpires,
   });
-  const newRefreshToken = jwt.sign(jwtPayload, config.jwt.refreshSecret, {
+  const refreshToken = jwt.sign(newPayload, config.jwt.refreshSecret, {
     expiresIn: config.jwt.refreshExpires,
   });
 
-  return {
-    accessToken: newAccessToken,
-    refreshToken: newRefreshToken,
-  };
-};
+  return { accessToken, refreshToken };
+}
 
-// Уже был helper для конвертации строковых duration в ms
-export const msFromDuration = (dur: string): number => {
-  const match = dur.match(/(\d+)([smhd])/);
-  if (!match) return 0;
-  const [, amount, unit] = match;
-  const map: any = { s: 1e3, m: 6e4, h: 36e5, d: 864e5 };
-  return parseInt(amount, 10) * map[unit];
+export default {
+  registerSeller,
+  loginSeller,
+  refreshTokens,
+  cookieOpts,
+  msFromDuration,
 };
-
-// экспорт конфигурации для контроллера
-export { config };

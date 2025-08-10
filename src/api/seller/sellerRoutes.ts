@@ -4,7 +4,7 @@ import validateRequest from "../../middlewares/validateRequest";
 import {
   registerSeller,
   loginSeller,
-  refreshSeller,
+  refreshTokens,
   logoutSeller,
 } from "./sellerController";
 import authenticateJwt from "../../middlewares/authenticateJwt";
@@ -37,7 +37,7 @@ router.post(
   loginSeller
 );
 
-router.post("/refresh", refreshSeller);
+router.post("/refresh", refreshTokens);
 router.post("/logout", authenticateJwt, logoutSeller);
 
 export default router;

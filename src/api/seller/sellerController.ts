@@ -7,15 +7,15 @@ export const registerSeller = async (
   next: NextFunction
 ) => {
   try {
-    const { accessToken } = await sellerService.registerSeller(req.body);
+    // registerSeller теперь возвращает прямую пару токенов
+    const { accessToken, refreshToken } = await sellerService.registerSeller(
+      req.body
+    );
+
     res
-      .cookie(
-        "refreshToken",
-        accessToken.refreshToken,
-        sellerService.cookieOpts()
-      )
+      .cookie("refreshToken", refreshToken, sellerService.cookieOpts())
       .status(201)
-      .json({ accessToken: accessToken.accessToken });
+      .json({ accessToken });
   } catch (err) {
     next(err);
   }
@@ -28,22 +28,28 @@ export const loginSeller = async (
 ) => {
   try {
     const { email, password } = req.body;
-    const tokens = await sellerService.loginSeller(email, password);
+    // Передаём объект dto вместо двух аргументов
+    const { accessToken, refreshToken } = await sellerService.loginSeller({
+      email,
+      password,
+    });
+
     res
-      .cookie("refreshToken", tokens.refreshToken, sellerService.cookieOpts())
+      .cookie("refreshToken", refreshToken, sellerService.cookieOpts())
       .status(200)
-      .json({ accessToken: tokens.accessToken });
+      .json({ accessToken });
   } catch (err) {
     next(err);
   }
 };
 
-export const refreshSeller = async (
+export const refreshTokens = async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   try {
+    // Сервис называется refreshTokens и возвращает пару токенов
     const { accessToken, refreshToken } = await sellerService.refreshTokens(
       req.cookies.refreshToken
     );
